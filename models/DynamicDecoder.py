@@ -161,33 +161,34 @@ class TransformerDecoderLayer(nn.Module):
         
         num, C, H, W = out.shape
         #print("Out: ", out.shape)
-        out = out.view(bs, int(num/bs), C, H, W) # bs, 300, 256, 7, 7
-        #print("Out: ", out.shape)  
+        out = out.view(bs, int(num/bs), C, H, W) 
+        #print("Out: ", out.shape)  # bs, 300, 256, 7, 7
         
         Q_star = object_embed.permute(1, 0, 2) # bs, 300, 256
         
         dynamic_kernel = self.fc_kernel(Q_star) # [bs, 300, 256**2]
         dynamic_kernel = dynamic_kernel.view(bs, self.num_queries, 256, 256) 
-
-        Q_F = []
-        for i in range(bs):
-            Q_FF = []
-            for j in range(self.num_queries):
-                k = dynamic_kernel[i, j, :]
-                k = torch.unsqueeze(k, -1)
-                k = torch.unsqueeze(k, -1)
+        
+        Q_F = []  # 存储最终的 Query 特征
+        for i in range(bs):  # 遍历 batch
+            Q_FF = []  # 存储当前 batch 内的 300 个 Query 结果
+            for j in range(self.num_queries):  # 遍历 300 个 Query
+                k = dynamic_kernel[i, j, :]  # 取出第 i 个 batch，第 j 个 query 的动态卷积核
+                k = torch.unsqueeze(k, -1)  # (256, 256, 1)
+                k = torch.unsqueeze(k, -1)  # (256, 256, 1, 1) -> 卷积核需要 4D 形状 (out_ch, in_ch, h, w)
+        
+                feat_in = out[i, j].unsqueeze(0)  # 取出 RoI 特征 (256, 7, 7) -> 添加 batch 维度变成 (1, 256, 7, 7)
+        
+                out_temp = self.conv_norm(F.conv2d(feat_in, k, padding='same'))  
+                # 使用动态卷积核 k 对特征 feat_in 进行 2D 卷积
+                # conv2d 输入: (1, 256, 7, 7)
+                # conv2d 卷积核: (256, 256, 1, 1)
+                # 输出形状: (1, 256, 7, 7)
+                # `conv_norm` 进行归一化
                 
-                feat_in = out[i, j].unsqueeze(0)
-                #print("Shape: ", feat_in.shape)
-                #print("k: ", k.shape)
-                #print(out[i].shape)
-                
-                out_temp = self.conv_norm(F.conv2d(feat_in, k, padding='same'))
-                #print(out.shape)
-                Q_FF.append(out_temp.squeeze(0)) # [(300,256,7,7)]
-            
-            #print(torch.stack(Q_FF).shape)
-            Q_F.append(torch.stack(Q_FF))
+                Q_FF.append(out_temp.squeeze(0))  # 去掉 batch 维度，得到 (256, 7, 7)
+        
+            Q_F.append(torch.stack(Q_FF))  # 组装 batch 维度，变成 (300, 256, 7, 7)
             
             ######--------------------------------------------------------------
             #print(Q_F[0].shape)
